@@ -109,7 +109,6 @@ func ParseMetadata(r io.Reader) (Metadata, error) {
 // ParseMetadataString is like [ParseMetadata], but for a string rather than
 // an io.Reader.
 func ParseMetadataString(s string) (Metadata, error) {
-	panic(1)
 	return ParseMetadataBytes([]byte(s))
 }
 
