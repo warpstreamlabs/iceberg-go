@@ -216,14 +216,7 @@ func init() {
                             "type": {
                                 "type": "record",
                                 "name": "r102",
-                                "fields": [
-                                    {"field-id": 1000, "name": "VendorID", "type": ["null", "int"]},
-                                    {
-                                        "field-id": 1001,                                        
-                                        "name": "tpep_pickup_datetime",
-                                        "type": ["null", {"type": "int", "logicalType": "date"}]
-                                    }
-                                ]
+                                "fields": []
                             },
                             "field-id": 102
                         },
@@ -402,14 +395,7 @@ func init() {
                             "type": {
                                 "type": "record",
                                 "name": "r102",
-                                "fields": [
-                                    {"field-id": 1000, "name": "VendorID", "type": ["null", "int"]},
-                                    {
-                                        "field-id": 1001,                                        
-                                        "name": "tpep_pickup_datetime",
-                                        "type": ["null", {"type": "int", "logicalType": "date"}]
-                                    }
-                                ]
+                                "fields": []
                             },
                             "field-id": 102
                         },
