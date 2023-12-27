@@ -18,9 +18,12 @@
 package iceberg
 
 import (
+	"errors"
+	"fmt"
 	"io"
 	"sync"
 
+	"github.com/apache/iceberg-go/internal"
 	iceio "github.com/apache/iceberg-go/io"
 
 	"github.com/hamba/avro/v2/ocf"
@@ -36,11 +39,63 @@ const (
 	ManifestContentDeletes ManifestContent = 1
 )
 
+func (mc ManifestContent) String() string {
+	switch mc {
+	case ManifestContentData:
+		return "data"
+	case ManifestContentDeletes:
+		return "deletes"
+	default:
+		return "unknown"
+	}
+}
+
 type FieldSummary struct {
 	ContainsNull bool    `avro:"contains_null"`
 	ContainsNaN  *bool   `avro:"contains_nan"`
 	LowerBound   *[]byte `avro:"lower_bound"`
 	UpperBound   *[]byte `avro:"upper_bound"`
+}
+
+type ManifestListV2Encoder struct {
+	enc *ocf.Encoder
+}
+
+func NewManifestListV2Encoder(w io.Writer) (*ManifestListV2Encoder, error) {
+	enc, err := ocf.NewEncoder(
+		internal.AvroSchemaCache.Get(internal.ManifestListV2Key).String(),
+		w,
+		ocf.WithMetadata(map[string][]byte{
+			"format-version": []byte("2"),
+			"avro.codec":     []byte("deflate"),
+		}),
+		ocf.WithCodec(ocf.Deflate),
+	)
+
+	if err != nil {
+		return nil, fmt.Errorf("ocf.NewEncoder failed, err: %w", err)
+	}
+
+	return &ManifestListV2Encoder{
+		enc: enc,
+	}, nil
+}
+
+func (lenc *ManifestListV2Encoder) Encode(m ManifestFile) error {
+	mv2 := m.(*manifestFileV2)
+	if mv2 == nil {
+		return errors.New("manifestFileV2 cannot be nil")
+	}
+
+	if err := lenc.enc.Encode(mv2); err != nil {
+		return fmt.Errorf("manifestFileV2 Encode failed, err: %w", err)
+	}
+
+	return nil
+}
+
+func (lenc *ManifestListV2Encoder) Close() error {
+	return lenc.enc.Close()
 }
 
 // ManifestV1Builder is a helper for building a V1 manifest file
@@ -527,6 +582,32 @@ func avroColMapToMap[K comparable, V any](c *[]colMap[K, V]) map[K]V {
 	return out
 }
 
+type DataFileBuilder struct {
+	d *dataFile
+}
+
+func NewDataFileBuilder(
+	content ManifestEntryContent,
+	path string,
+	format FileFormat,
+	recordCount int64,
+	fileSize int64,
+) *DataFileBuilder {
+	return &DataFileBuilder{
+		d: &dataFile{
+			Content:     content,
+			Path:        path,
+			Format:      format,
+			RecordCount: recordCount,
+			FileSize:    fileSize,
+		},
+	}
+}
+
+func (b *DataFileBuilder) Build() *dataFile {
+	return b.d
+}
+
 type dataFile struct {
 	Content          ManifestEntryContent   `avro:"content"`
 	Path             string                 `avro:"file_path"`
@@ -661,12 +742,92 @@ func (m *manifestEntryV1) FileSequenceNum() *int64 {
 
 func (m *manifestEntryV1) DataFile() DataFile { return &m.Data }
 
+type ManifestEntryV2Encoder struct {
+	w   io.Writer
+	enc *ocf.Encoder
+}
+
+func NewManifestEntryV2Encoder(
+	w io.Writer,
+	schemaJSON string,
+	schemaID string,
+	partitionSpecJSON string,
+	partitionSpecID string,
+	content ManifestContent,
+) (*ManifestEntryV2Encoder, error) {
+	enc, err := ocf.NewEncoder(
+		internal.AvroSchemaCache.Get(internal.ManifestEntryV2Key).String(),
+		w,
+		ocf.WithMetadata(map[string][]byte{
+			"schema":            []byte(schemaJSON),
+			"schema-id":         []byte(schemaID),
+			"partition-spec":    []byte(partitionSpecJSON),
+			"partition-spec-id": []byte(partitionSpecID),
+			"format-version":    []byte("2"),
+			"avro.codec":        []byte("deflate"),
+			"content":           []byte(content.String()),
+		}),
+		ocf.WithCodec(ocf.Deflate),
+	)
+
+	if err != nil {
+		return nil, fmt.Errorf("ocf.NewEncoder failed, err: %w", err)
+	}
+
+	return &ManifestEntryV2Encoder{
+		w:   w,
+		enc: enc,
+	}, nil
+}
+
+func (menc *ManifestEntryV2Encoder) Encode(m ManifestEntry) error {
+	mv2 := m.(*manifestEntryV2)
+	if mv2 == nil {
+		return errors.New("manifestEntryV2 cannot be nil")
+	}
+
+	if err := menc.enc.Encode(mv2); err != nil {
+		return fmt.Errorf("manifestEntryV2 Encode failed, err: %w", err)
+	}
+
+	return nil
+}
+
+func (menc *ManifestEntryV2Encoder) Close() error {
+	return menc.enc.Close()
+}
+
+type ManifestEntryV2Builder struct {
+	m *manifestEntryV2
+}
+
+func NewManifestEntryV2Builder(
+	status ManifestEntryStatus,
+	snapshotID int64,
+) *ManifestEntryV2Builder {
+	return &ManifestEntryV2Builder{
+		m: &manifestEntryV2{
+			EntryStatus: status,
+			Snapshot:    &snapshotID,
+		},
+	}
+}
+
+func (b *ManifestEntryV2Builder) DataFile(df *dataFile) *ManifestEntryV2Builder {
+	b.m.Data = df
+	return b
+}
+
+func (b *ManifestEntryV2Builder) Build() ManifestEntry {
+	return b.m
+}
+
 type manifestEntryV2 struct {
 	EntryStatus ManifestEntryStatus `avro:"status"`
 	Snapshot    *int64              `avro:"snapshot_id"`
 	SeqNum      *int64              `avro:"sequence_number"`
 	FileSeqNum  *int64              `avro:"file_sequence_number"`
-	Data        dataFile            `avro:"data_file"`
+	Data        *dataFile           `avro:"data_file"`
 }
 
 func (m *manifestEntryV2) inheritSeqNum(manifest ManifestFile) {
@@ -704,7 +865,7 @@ func (m *manifestEntryV2) FileSequenceNum() *int64 {
 	return m.FileSeqNum
 }
 
-func (m *manifestEntryV2) DataFile() DataFile { return &m.Data }
+func (m *manifestEntryV2) DataFile() DataFile { return m.Data }
 
 // DataFile is the interface for reading the information about a
 // given data file indicated by an entry in a manifest list.

@@ -325,7 +325,7 @@ var (
 		{
 			EntryStatus: EntryStatusADDED,
 			Snapshot:    &entrySnapshotID,
-			Data: dataFile{
+			Data: &dataFile{
 				Path:             manifestEntryV1Records[0].Data.Path,
 				Format:           manifestEntryV1Records[0].Data.Format,
 				PartitionData:    manifestEntryV1Records[0].Data.PartitionData,
@@ -345,7 +345,7 @@ var (
 		{
 			EntryStatus: EntryStatusADDED,
 			Snapshot:    &entrySnapshotID,
-			Data: dataFile{
+			Data: &dataFile{
 				Path:             manifestEntryV1Records[1].Data.Path,
 				Format:           manifestEntryV1Records[1].Data.Format,
 				PartitionData:    manifestEntryV1Records[1].Data.PartitionData,
@@ -386,15 +386,10 @@ func (m *ManifestTestSuite) writeManifestList() {
 	m.Require().NoError(enc.Encode(manifestFileRecordsV1[0]))
 	enc.Close()
 
-	enc, err = ocf.NewEncoder(internal.AvroSchemaCache.Get(internal.ManifestListV2Key).String(),
-		&m.v2ManifestList, ocf.WithMetadata(map[string][]byte{
-			"format-version": []byte("2"),
-			"avro.codec":     []byte("deflate"),
-		}), ocf.WithCodec(ocf.Deflate))
+	lenc, err := NewManifestListV2Encoder(&m.v2ManifestList)
 	m.Require().NoError(err)
-
-	m.Require().NoError(enc.Encode(manifestFileRecordsV2[0]))
-	enc.Close()
+	m.Require().NoError(lenc.Encode(manifestFileRecordsV2[0]))
+	lenc.Close()
 }
 
 func (m *ManifestTestSuite) writeManifestEntries() {
@@ -409,17 +404,16 @@ func (m *ManifestTestSuite) writeManifestEntries() {
 	}
 	m.Require().NoError(enc.Close())
 
-	enc, err = ocf.NewEncoder(internal.AvroSchemaCache.Get(internal.ManifestEntryV2Key).String(),
-		&m.v2ManifestEntries, ocf.WithMetadata(map[string][]byte{
-			"format-version": []byte("2"),
-			"avro.codec":     []byte("deflate"),
-		}), ocf.WithCodec(ocf.Deflate))
+	menc, err := NewManifestEntryV2Encoder(
+		&m.v2ManifestEntries,
+		"", "", "", "",
+		ManifestContentData)
 	m.Require().NoError(err)
 
 	for _, ent := range manifestEntryV2Records {
-		m.Require().NoError(enc.Encode(ent))
+		m.Require().NoError(menc.Encode(ent))
 	}
-	m.Require().NoError(enc.Close())
+	m.Require().NoError(menc.Close())
 }
 
 func (m *ManifestTestSuite) SetupSuite() {
